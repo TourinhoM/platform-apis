@@ -1,0 +1,146 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: appdatabase.platform.lab
+spec:
+  compositeTypeRef:
+    apiVersion: platform.lab/v1alpha1
+    kind: XAppDatabase
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # Recurso 1: Job que cria o banco e o usuário no PostgreSQL compartilhado
+          # managementPolicies sem Update: Crossplane cria uma vez e não toca mais
+          # (Jobs são imutáveis — tentar atualizar um Job completo causaria erro)
+          - name: db-init-job
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies:
+                  - Observe
+                  - Create
+                  - Delete
+                forProvider:
+                  manifest:
+                    apiVersion: batch/v1
+                    kind: Job
+                    metadata:
+                      name: placeholder
+                      namespace: infra
+                    spec:
+                      ttlSecondsAfterFinished: 600
+                      template:
+                        spec:
+                          restartPolicy: OnFailure
+                          containers:
+                            - name: create-db
+                              image: postgres:15-alpine
+                              command:
+                                - /bin/sh
+                                - -c
+                                - |
+                                  psql "postgresql://postgres:$(POSTGRES_ADMIN_PASSWORD)@postgresql:5432/postgres" \
+                                    -c "SELECT 'CREATE DATABASE \"$DB_NAME\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$DB_NAME')\gexec" \
+                                    -c "SELECT 'CREATE USER \"$DB_USER\" WITH PASSWORD ''$DB_PASSWORD''' WHERE NOT EXISTS (SELECT FROM pg_user WHERE usename = '$DB_USER')\gexec" \
+                                    -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\";"
+                              env:
+                                - name: POSTGRES_ADMIN_PASSWORD
+                                  valueFrom:
+                                    secretKeyRef:
+                                      name: postgresql-auth
+                                      key: POSTGRES_PASSWORD
+                                - name: DB_NAME
+                                  value: placeholder
+                                - name: DB_USER
+                                  value: placeholder
+                                - name: DB_PASSWORD
+                                  value: placeholder
+                providerConfigRef:
+                  name: in-cluster
+            patches:
+              # Nome do Job = db-init-<claim-name>
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
+                toFieldPath: spec.forProvider.manifest.metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "db-init-%s"
+              # Variáveis de ambiente do container
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.databaseName
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[1].value
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appUser
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[2].value
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appPassword
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[3].value
+
+          # Recurso 2: Secret com a connection string no namespace da app
+          - name: connection-secret
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Secret
+                    metadata:
+                      name: placeholder
+                      namespace: placeholder
+                    type: Opaque
+                    stringData:
+                      DATABASE_HOST: postgresql.infra.svc.cluster.local
+                      DATABASE_PORT: "5432"
+                      DATABASE_NAME: placeholder
+                      DATABASE_USER: placeholder
+                      DATABASE_PASSWORD: placeholder
+                      DATABASE_URL: placeholder
+                providerConfigRef:
+                  name: in-cluster
+            patches:
+              # Nome do Secret = <claim-name>-db
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
+                toFieldPath: spec.forProvider.manifest.metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db"
+              # Namespace da app onde o Secret vai ficar
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appNamespace
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              # Campos individuais
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.databaseName
+                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_NAME
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appUser
+                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_USER
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appPassword
+                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_PASSWORD
+              # DATABASE_URL composta de múltiplos campos via CombineFromComposite
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appUser
+                    - fromFieldPath: spec.appPassword
+                    - fromFieldPath: spec.databaseName
+                  strategy: string
+                  string:
+                    fmt: "postgresql://%s:%s@postgresql.infra.svc.cluster.local:5432/%s"
+                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_URL

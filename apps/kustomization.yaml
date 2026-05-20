@@ -2,5 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - apis-appnamespace.yaml
-  # apis-appdatabase.yaml — descomentar quando AppDatabase estiver pronto
+  - apis-appdatabase.yaml
+  # apis-appcache.yaml — descomentar quando AppCache estiver pronto
   # apis-appcache.yaml    — descomentar quando AppCache estiver pronto

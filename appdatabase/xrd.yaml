@@ -1,0 +1,43 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xappdatabases.platform.lab
+spec:
+  group: platform.lab
+
+  names:
+    kind: XAppDatabase
+    plural: xappdatabases
+
+  claimNames:
+    kind: AppDatabase
+    plural: appdatabases
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                databaseName:
+                  type: string
+                  description: Nome do banco de dados a criar no PostgreSQL compartilhado
+                appUser:
+                  type: string
+                  description: Usuário PostgreSQL que a app vai usar
+                appPassword:
+                  type: string
+                  description: Senha do usuário (use ExternalSecret no repo da app para não versionar em plain text)
+                appNamespace:
+                  type: string
+                  description: Namespace onde o Secret de conexão será criado
+              required:
+                - databaseName
+                - appUser
+                - appPassword
+                - appNamespace
