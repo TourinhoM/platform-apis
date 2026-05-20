@@ -47,10 +47,10 @@ spec:
                                 - /bin/sh
                                 - -c
                                 - |
-                                  psql "postgresql://postgres:$(POSTGRES_ADMIN_PASSWORD)@postgresql:5432/postgres" \
-                                    -c "SELECT 'CREATE DATABASE \"$DB_NAME\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$DB_NAME')\gexec" \
-                                    -c "SELECT 'CREATE USER \"$DB_USER\" WITH PASSWORD ''$DB_PASSWORD''' WHERE NOT EXISTS (SELECT FROM pg_user WHERE usename = '$DB_USER')\gexec" \
-                                    -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\";"
+                                  PGURL="postgresql://postgres:$(POSTGRES_ADMIN_PASSWORD)@postgresql:5432/postgres"
+                                  psql "$PGURL" -c "CREATE DATABASE \"$DB_NAME\"" || true
+                                  psql "$PGURL" -c "CREATE USER \"$DB_USER\" WITH PASSWORD '$DB_PASSWORD'" || true
+                                  psql "$PGURL" -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\""
                               env:
                                 - name: POSTGRES_ADMIN_PASSWORD
                                   valueFrom:
