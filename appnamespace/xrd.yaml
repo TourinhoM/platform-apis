@@ -1,0 +1,41 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xappnamespaces.platform.lab
+spec:
+  group: platform.lab
+
+  # tipo cluster-scoped (interno do Crossplane)
+  names:
+    kind: XAppNamespace
+    plural: xappnamespaces
+
+  # tipo que o time de app cria (namespace-scoped)
+  claimNames:
+    kind: AppNamespace
+    plural: appnamespaces
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                teamName:
+                  type: string
+                  description: Nome do time dono do namespace (usado como label)
+                cpuLimit:
+                  type: string
+                  description: Limite total de CPU do namespace (ex:"2")
+                memoryLimit:
+                  type: string
+                  description: Limite total de memória do namespace (ex:"4Gi")
+              required:
+                - teamName
+                - cpuLimit
+                - memoryLimit

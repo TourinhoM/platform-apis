@@ -1,0 +1,79 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: appnamespace.platform.lab
+spec:
+  compositeTypeRef:
+    apiVersion: platform.lab/v1alpha1
+    kind: XAppNamespace
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # Recurso 1: o Namespace
+          - name: namespace
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                      name: placeholder
+                      labels:
+                        platform.lab/team: placeholder
+                providerConfigRef:
+                  name: in-cluster
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
+                toFieldPath: spec.forProvider.manifest.metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.teamName
+                toFieldPath: spec.forProvider.manifest.metadata.labels["platform.lab/team"]
+
+          # Recurso 2: ResourceQuota com os limites definidos no Claim
+          - name: resource-quota
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: ResourceQuota
+                    metadata:
+                      name: default
+                      namespace: placeholder
+                    spec:
+                      hard:
+                        requests.cpu: placeholder
+                        requests.memory: placeholder
+                        limits.cpu: placeholder
+                        limits.memory: placeholder
+                providerConfigRef:
+                  name: in-cluster
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.cpuLimit
+                toFieldPath: spec.forProvider.manifest.spec.hard["requests.cpu"]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.cpuLimit
+                toFieldPath: spec.forProvider.manifest.spec.hard["limits.cpu"]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.memoryLimit
+                toFieldPath: spec.forProvider.manifest.spec.hard["requests.memory"]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.memoryLimit
+                toFieldPath: spec.forProvider.manifest.spec.hard["limits.memory"]
