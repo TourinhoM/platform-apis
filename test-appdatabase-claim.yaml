@@ -6,5 +6,4 @@ metadata:
 spec:
   databaseName: app_catalog
   appUser: app_catalog_user
-  appPassword: "testpass123"
   appNamespace: default

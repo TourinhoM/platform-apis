@@ -30,14 +30,10 @@ spec:
                 appUser:
                   type: string
                   description: Usuário PostgreSQL que a app vai usar
-                appPassword:
-                  type: string
-                  description: Senha do usuário (use ExternalSecret no repo da app para não versionar em plain text)
                 appNamespace:
                   type: string
-                  description: Namespace onde o Secret de conexão será criado
+                  description: Namespace onde o Secret de conexão será criado via ExternalSecret
               required:
                 - databaseName
                 - appUser
-                - appPassword
                 - appNamespace

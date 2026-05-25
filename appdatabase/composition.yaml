@@ -8,139 +8,135 @@ spec:
     kind: XAppDatabase
   mode: Pipeline
   pipeline:
-    - step: patch-and-transform
+    - step: generate-resources
       functionRef:
-        name: function-patch-and-transform
+        name: function-go-templating
       input:
-        apiVersion: pt.fn.crossplane.io/v1beta1
-        kind: Resources
-        resources:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $claimName := index .observed.composite.resource.metadata.labels "crossplane.io/claim-name" }}
+            {{- $appUser   := .observed.composite.resource.spec.appUser }}
+            {{- $dbName    := .observed.composite.resource.spec.databaseName }}
+            {{- $appNs     := .observed.composite.resource.spec.appNamespace }}
 
-          # Recurso 1: Job que cria o banco e o usuário no PostgreSQL compartilhado
-          # managementPolicies sem Update: Crossplane cria uma vez e não toca mais
-          # (Jobs são imutáveis — tentar atualizar um Job completo causaria erro)
-          - name: db-init-job
-            base:
-              apiVersion: kubernetes.crossplane.io/v1alpha2
-              kind: Object
-              spec:
-                managementPolicies:
-                  - Observe
-                  - Create
-                  - Delete
-                forProvider:
-                  manifest:
-                    apiVersion: batch/v1
-                    kind: Job
-                    metadata:
-                      name: placeholder
-                      namespace: infra
-                    spec:
-                      ttlSecondsAfterFinished: 600
-                      template:
-                        spec:
-                          restartPolicy: OnFailure
-                          containers:
-                            - name: create-db
-                              image: postgres:15-alpine
-                              command:
-                                - /bin/sh
-                                - -c
-                                - |
-                                  PGURL="postgresql://postgres:$(POSTGRES_ADMIN_PASSWORD)@postgresql:5432/postgres"
-                                  psql "$PGURL" -c "CREATE DATABASE \"$DB_NAME\"" || true
-                                  psql "$PGURL" -c "CREATE USER \"$DB_USER\" WITH PASSWORD '$DB_PASSWORD'" || true
-                                  psql "$PGURL" -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\""
-                              env:
-                                - name: POSTGRES_ADMIN_PASSWORD
-                                  valueFrom:
-                                    secretKeyRef:
-                                      name: postgresql-auth
-                                      key: POSTGRES_PASSWORD
-                                - name: DB_NAME
-                                  value: placeholder
-                                - name: DB_USER
-                                  value: placeholder
-                                - name: DB_PASSWORD
-                                  value: placeholder
-                providerConfigRef:
-                  name: in-cluster
-            patches:
-              # Nome do Job = db-init-<claim-name>
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
-                toFieldPath: spec.forProvider.manifest.metadata.name
-                transforms:
-                  - type: string
-                    string:
-                      type: Format
-                      fmt: "db-init-%s"
-              # Variáveis de ambiente do container
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.databaseName
-                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[1].value
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.appUser
-                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[2].value
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.appPassword
-                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[3].value
+            {{/* Preserva senha existente para não rotacionar a cada reconciliação */}}
+            {{- $password := randAlphaNum 24 }}
+            {{- $existing := index .observed.resources "db-creds" }}
+            {{- if $existing }}
+              {{- $encoded := dig "resource" "spec" "forProvider" "manifest" "data" "password" "" $existing }}
+              {{- if $encoded }}{{ $password = $encoded | b64dec }}{{- end }}
+            {{- end }}
 
-          # Recurso 2: Secret com a connection string no namespace da app
-          - name: connection-secret
-            base:
-              apiVersion: kubernetes.crossplane.io/v1alpha2
-              kind: Object
-              spec:
-                forProvider:
-                  manifest:
-                    apiVersion: v1
-                    kind: Secret
-                    metadata:
-                      name: placeholder
-                      namespace: placeholder
-                    type: Opaque
-                    stringData:
-                      DATABASE_HOST: postgresql.infra.svc.cluster.local
-                      DATABASE_PORT: "5432"
-                      DATABASE_NAME: placeholder
-                      DATABASE_USER: placeholder
-                      DATABASE_PASSWORD: placeholder
-                      DATABASE_URL: placeholder
-                providerConfigRef:
-                  name: in-cluster
-            patches:
-              # Nome do Secret = <claim-name>-db
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
-                toFieldPath: spec.forProvider.manifest.metadata.name
-                transforms:
-                  - type: string
-                    string:
-                      type: Format
-                      fmt: "%s-db"
-              # Namespace da app onde o Secret vai ficar
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.appNamespace
-                toFieldPath: spec.forProvider.manifest.metadata.namespace
-              # Campos individuais
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.databaseName
-                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_NAME
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.appUser
-                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_USER
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.appPassword
-                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_PASSWORD
-              # DATABASE_URL composta de múltiplos campos via CombineFromComposite
-              - type: CombineFromComposite
-                combine:
-                  variables:
-                    - fromFieldPath: spec.appUser
-                    - fromFieldPath: spec.appPassword
-                    - fromFieldPath: spec.databaseName
-                  strategy: string
-                  string:
-                    fmt: "postgresql://%s:%s@postgresql.infra.svc.cluster.local:5432/%s"
-                toFieldPath: spec.forProvider.manifest.stringData.DATABASE_URL
+            ---
+            # Secret com a senha gerada — usado pelo Job de bootstrap via volume montado.
+            # managementPolicies sem Update: senha nunca é alterada após criação.
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: db-creds-{{ $claimName }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db-creds
+            spec:
+              managementPolicies:
+                - Observe
+                - Create
+                - Delete
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Secret
+                  metadata:
+                    name: db-init-creds-{{ $claimName }}
+                    namespace: infra
+                  data:
+                    password: {{ $password | b64enc }}
+              providerConfigRef:
+                name: in-cluster
+            ---
+            # Job que cria o banco e o usuário no PostgreSQL compartilhado.
+            # Lê a senha do Secret acima via volume — nada em variáveis de ambiente plain text.
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: db-init-job-{{ $claimName }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db-init-job
+            spec:
+              managementPolicies:
+                - Observe
+                - Create
+                - Delete
+              forProvider:
+                manifest:
+                  apiVersion: batch/v1
+                  kind: Job
+                  metadata:
+                    name: db-init-{{ $claimName }}
+                    namespace: infra
+                  spec:
+                    ttlSecondsAfterFinished: 600
+                    template:
+                      spec:
+                        restartPolicy: OnFailure
+                        volumes:
+                          - name: db-creds
+                            secret:
+                              secretName: db-init-creds-{{ $claimName }}
+                        containers:
+                          - name: create-db
+                            image: postgres:15-alpine
+                            command:
+                              - /bin/sh
+                              - -c
+                              - |
+                                PASSWORD=$(cat /secrets/password)
+                                PGURL="postgresql://postgres:$(POSTGRES_ADMIN_PASSWORD)@postgresql:5432/postgres"
+                                psql "$PGURL" -c "CREATE USER \"{{ $appUser }}\"" || true
+                                psql "$PGURL" -c "ALTER USER \"{{ $appUser }}\" WITH PASSWORD '$PASSWORD'"
+                                psql "$PGURL" -c "CREATE DATABASE \"{{ $dbName }}\"" || true
+                                psql "$PGURL" -c "GRANT ALL PRIVILEGES ON DATABASE \"{{ $dbName }}\" TO \"{{ $appUser }}\""
+                            env:
+                              - name: POSTGRES_ADMIN_PASSWORD
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: postgresql-auth
+                                    key: POSTGRES_PASSWORD
+                            volumeMounts:
+                              - name: db-creds
+                                mountPath: /secrets
+                                readOnly: true
+              providerConfigRef:
+                name: in-cluster
+            ---
+            # Secret com connection details no namespace da app.
+            # managementPolicies sem Update: alinhado com o db-creds — mesma senha para sempre.
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: db-conn-secret-{{ $claimName }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db-conn-secret
+            spec:
+              managementPolicies:
+                - Observe
+                - Create
+                - Delete
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Secret
+                  metadata:
+                    name: {{ $claimName }}-db
+                    namespace: {{ $appNs }}
+                  data:
+                    DATABASE_HOST:     {{ "postgresql.infra.svc.cluster.local" | b64enc }}
+                    DATABASE_PORT:     {{ "5432" | b64enc }}
+                    DATABASE_NAME:     {{ $dbName | b64enc }}
+                    DATABASE_USER:     {{ $appUser | b64enc }}
+                    DATABASE_PASSWORD: {{ $password | b64enc }}
+                    DATABASE_URL:      {{ printf "postgresql://%s:%s@postgresql.infra.svc.cluster.local:5432/%s" $appUser $password $dbName | b64enc }}
+              providerConfigRef:
+                name: in-cluster
