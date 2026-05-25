@@ -3,5 +3,4 @@ kind: Kustomization
 resources:
   - apis-appnamespace.yaml
   - apis-appdatabase.yaml
-  # apis-appcache.yaml — descomentar quando AppCache estiver pronto
-  # apis-appcache.yaml    — descomentar quando AppCache estiver pronto
+  - apis-appcache.yaml
