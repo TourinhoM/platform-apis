@@ -125,6 +125,16 @@ spec:
                   targetPort: http
               selector:
                 app.kubernetes.io/name: {{ $name }}
+            {{- /* Readiness do Deployment derivada do observado: Deployment
+                 não tem condition Ready (só Available) e a inferência nativa
+                 nunca o marca pronto. Disponível = pronto. */}}
+            {{- $deployReady := "False" }}
+            {{- $deployObs := index (.observed.resources | default dict) "deployment" }}
+            {{- if $deployObs }}
+            {{- range dig "resource" "status" "conditions" (list) $deployObs }}
+            {{- if and (eq .type "Available") (eq .status "True") }}{{ $deployReady = "True" }}{{ end }}
+            {{- end }}
+            {{- end }}
             ---
             apiVersion: apps/v1
             kind: Deployment
@@ -133,6 +143,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: deployment
+                gotemplating.fn.crossplane.io/ready: {{ $deployReady | quote }}
               labels:
                 app.kubernetes.io/name: app
                 backstage.io/kubernetes-id: {{ $name }}
