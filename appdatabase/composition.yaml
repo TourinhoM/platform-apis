@@ -24,7 +24,9 @@ spec:
 
             {{/* Preserva senha existente para não rotacionar a cada reconciliação */}}
             {{- $password := randAlphaNum 24 }}
-            {{- $existing := index .observed.resources "db-creds" }}
+            {{- /* dig nil-safe: no 1º reconcile .observed.resources é nil
+                 e index explode (fatal). Latente até a 1ª claim pós v0.12. */}}
+            {{- $existing := dig "resources" "db-creds" (dict) .observed }}
             {{- if $existing }}
               {{- $encoded := dig "resource" "spec" "forProvider" "manifest" "data" "password" "" $existing }}
               {{- if $encoded }}{{ $password = $encoded | b64dec }}{{- end }}
