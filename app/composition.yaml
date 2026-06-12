@@ -80,6 +80,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: app-config
+                gotemplating.fn.crossplane.io/ready: "True"
               labels:
                 backstage.io/kubernetes-id: {{ $name }}
             data:
@@ -96,6 +97,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: app-env
+                gotemplating.fn.crossplane.io/ready: "True"
               labels:
                 backstage.io/kubernetes-id: {{ $name }}
             data:
@@ -111,6 +113,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: service
+                gotemplating.fn.crossplane.io/ready: "True"
               labels:
                 app.kubernetes.io/name: app
                 backstage.io/kubernetes-id: {{ $name }}
@@ -228,6 +231,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: servicemonitor
+                gotemplating.fn.crossplane.io/ready: "True"
               labels:
                 app.kubernetes.io/name: app
                 backstage.io/kubernetes-id: {{ $name }}
@@ -276,6 +280,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: ingress
+                gotemplating.fn.crossplane.io/ready: "True"
                 traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
               labels:
                 app.kubernetes.io/name: app
