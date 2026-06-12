@@ -1,0 +1,93 @@
+name: Lint APIs
+
+# Render-then-scan do Caminho B (S5 do workload experiment): o que o
+# kustomize build é pro lint-k8s, o `crossplane composition render` é aqui —
+# materializa a composition contra fixtures (app/tests/) e roda os MESMOS
+# scanners da plataforma sobre o output.
+#
+# Workflow auto-contido (não reusa as actions kubeconform/kube-linter/polaris
+# do org-ci-platform): elas são kustomize-shaped — hard-wired no
+# kustomize-prepare, sem input de YAML pré-renderizado. Refatorá-las pra
+# renderer-agnostic toca o caminho crítico do A no meio do experimento;
+# fica anotado como item pós-ADR se o B vencer.
+#
+# Versões dos scanners espelham as actions da plataforma (paridade A↔B).
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/lint-apis.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render-scan:
+    name: crossplane render + 3 scanners
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Bash install: CLI distribuído como binário direto (sem action
+      # oficial). Render roda as functions via Docker (presente no runner).
+      - name: Install crossplane CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=v2.3.2
+          curl -sSL -o /usr/local/bin/crossplane \
+            "https://releases.crossplane.io/stable/${VERSION}/bin/linux_amd64/crank"
+          chmod +x /usr/local/bin/crossplane
+          # bump-via: https://releases.crossplane.io/stable/
+
+      # `echo "---"` antes de cada render: mesmo cuidado do lint-k8s —
+      # concatenar outputs sem separador funde docs e parsers descartam.
+      - name: Render fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=rendered.yaml
+          : > "$out"
+          for xr in app/tests/xr-*.yaml; do
+            echo "---" >> "$out"
+            crossplane composition render \
+              "$xr" app/composition.yaml app/tests/functions.yaml >> "$out"
+          done
+          echo "renderizados $(grep -c '^kind:' "$out") recursos a partir de $(ls app/tests/xr-*.yaml | wc -l) fixtures"
+
+      # Schema validation; CRs (ServiceMonitor/Certificate/XRs) não têm
+      # schema no catálogo default — skip explícito, igual à postura do
+      # kubeconform action da plataforma com CRDs.
+      - name: kubeconform
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=0.7.0
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/v${VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+          kubeconform -strict -summary -ignore-missing-schemas \
+            -kubernetes-version master rendered.yaml
+
+      - name: kube-linter
+        uses: stackrox/kube-linter-action@87802a2f4e01abebb3ee3c67a3002fea71f6eae5 # v1.0.7
+        with:
+          directory: rendered.yaml
+          version: v0.8.3
+
+      - name: polaris
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=9.6.0
+          curl -sSL "https://github.com/FairwindsOps/polaris/releases/download/${VERSION}/polaris_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin polaris
+          polaris audit --audit-path rendered.yaml \
+            --format pretty --set-exit-code-on-danger

@@ -1,0 +1,17 @@
+# Fixture de lint: App com TODOS os campos do contrato.
+# Exercita http (Ingress+Certificate), env (app-env + envFrom via patch) e
+# capabilities (XAppDatabase + XAppCache compostos).
+apiVersion: platform.lab/v1alpha1
+kind: App
+metadata:
+  name: lint-full
+spec:
+  image: ghcr.io/tourinho-labs/lint-full:0.0.0
+  size: large
+  http: true
+  env:
+    FEATURE_X: "true"
+    LOG_LEVEL: debug
+  capabilities:
+    - database
+    - cache

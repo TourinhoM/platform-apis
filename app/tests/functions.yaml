@@ -1,0 +1,10 @@
+# Functions que o `crossplane composition render` precisa rodar localmente
+# (Docker no runner). Mesmo package/versão do cluster
+# (platform-crossplane/providers) — divergência aqui = lint validando outra
+# realidade.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.12.1
