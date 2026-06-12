@@ -259,6 +259,16 @@ spec:
                  http — Certificate + Ingress (espelho do component http)
                  ============================================================ */}}
             {{- if $http }}
+            {{- /* Readiness derivada do observado, como no Deployment: a
+                 inferência nativa NÃO lê conditions de recurso k8s cru —
+                 nem a condition Ready do cert-manager. */}}
+            {{- $certReady := "False" }}
+            {{- $certObs := index (.observed.resources | default dict) "certificate" }}
+            {{- if $certObs }}
+            {{- range dig "resource" "status" "conditions" (list) $certObs }}
+            {{- if and (eq .type "Ready") (eq .status "True") }}{{ $certReady = "True" }}{{ end }}
+            {{- end }}
+            {{- end }}
             ---
             apiVersion: cert-manager.io/v1
             kind: Certificate
@@ -267,6 +277,7 @@ spec:
               namespace: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: certificate
+                gotemplating.fn.crossplane.io/ready: {{ $certReady | quote }}
               labels:
                 app.kubernetes.io/name: app
                 backstage.io/kubernetes-id: {{ $name }}
