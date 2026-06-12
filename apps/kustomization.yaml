@@ -4,3 +4,4 @@ resources:
   - apis-appnamespace.yaml
   - apis-appdatabase.yaml
   - apis-appcache.yaml
+  - apis-app.yaml

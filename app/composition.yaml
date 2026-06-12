@@ -1,0 +1,335 @@
+# Composition do App: gera os MESMOS recursos que o platform-app-base rende
+# no Caminho A (kustomize) — app-base é a implementação de referência;
+# divergência de output entre os caminhos é bug DESTA composition.
+# Gabarito: kustomize build de um gitops repo do Caminho A (small+http).
+#
+# Template inline único com seções comentadas — a forma típica da comunidade
+# Crossplane (multi-step da mesma function custa 1 gRPC/step/reconcile;
+# modularização "séria" seria function-kcl — nota no ADR do experimento).
+#
+# Idioma v2: recursos compostos direto, sem provider-kubernetes Object.
+# RBAC: ClusterRole crossplane-compose-workload (platform-crossplane/rbac).
+# Workload referencia o namespace antes dele existir: Crossplane reconcilia
+# até convergir (eventual consistency — mesmo comportamento do Argo no A).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: app.platform.lab
+spec:
+  compositeTypeRef:
+    apiVersion: platform.lab/v1alpha1
+    kind: App
+  mode: Pipeline
+  pipeline:
+    - step: generate-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $name := .observed.composite.resource.metadata.name }}
+            {{- $spec := .observed.composite.resource.spec }}
+            {{- /* dig: default p/ campo ausente sem engolir `false` (como o
+                 `default` faria com http) e sem depender do modo missingkey */}}
+            {{- $size := dig "size" "small" $spec }}
+            {{- $http := dig "http" true $spec }}
+            {{- $env  := dig "env" (dict) $spec }}
+            {{- $caps := dig "capabilities" (list) $spec }}
+
+            {{- /* size -> resources do container: mesmos números dos
+                 components size-* do app-base (a plataforma é dona deles) */}}
+            {{- $resources := dict
+                  "small"  (dict "requests" (dict "cpu" "50m"  "memory" "64Mi")  "limits" (dict "cpu" "200m" "memory" "256Mi"))
+                  "medium" (dict "requests" (dict "cpu" "250m" "memory" "256Mi") "limits" (dict "cpu" "1"    "memory" "512Mi"))
+                  "large"  (dict "requests" (dict "cpu" "500m" "memory" "512Mi") "limits" (dict "cpu" "2"    "memory" "1Gi"))
+            }}
+            {{- $res := index $resources $size }}
+
+            {{- /* ============================================================
+                 namespace — XAppNamespace cria Namespace + ResourceQuota
+                 (mesma engine do Caminho A). A label crossplane.io/claim-name
+                 é o que a composition do appnamespace usa pra derivar o nome
+                 do namespace — setada manualmente porque no v2 não há claim.
+                 ============================================================ */}}
+            ---
+            apiVersion: platform.lab/v1alpha1
+            kind: XAppNamespace
+            metadata:
+              name: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: namespace
+              labels:
+                crossplane.io/claim-name: {{ $name }}
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              teamName: {{ $name }}
+              size: {{ $size }}
+
+            {{- /* ============================================================
+                 workload — ConfigMaps + Service + Deployment
+                 (espelho dos components workload + metrics + size-*)
+                 ============================================================ */}}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: app-config
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: app-config
+              labels:
+                backstage.io/kubernetes-id: {{ $name }}
+            data:
+              name: {{ $name }}
+            {{- if $http }}
+              hostname: {{ $name }}.local
+            {{- end }}
+            {{- if $env }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: app-env
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: app-env
+              labels:
+                backstage.io/kubernetes-id: {{ $name }}
+            data:
+            {{- range $key, $value := $env }}
+              {{ $key }}: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: service
+              labels:
+                app.kubernetes.io/name: app
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              ports:
+                - name: http
+                  port: 3000
+                  protocol: TCP
+                  targetPort: http
+              selector:
+                app.kubernetes.io/name: {{ $name }}
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: deployment
+              labels:
+                app.kubernetes.io/name: app
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ $name }}
+              template:
+                metadata:
+                  labels:
+                    app.kubernetes.io/name: {{ $name }}
+                    backstage.io/kubernetes-id: {{ $name }}
+                spec:
+                  securityContext:
+                    fsGroup: 1000
+                    runAsNonRoot: true
+                    runAsUser: 1000
+                  terminationGracePeriodSeconds: 30
+                  containers:
+                    - name: app
+                      image: {{ $spec.image }}
+                      ports:
+                        - containerPort: 3000
+                          name: http
+                          protocol: TCP
+                      env:
+                        - name: PORT
+                          value: "3000"
+                        - name: OTEL_SERVICE_NAME
+                          valueFrom:
+                            configMapKeyRef:
+                              key: name
+                              name: app-config
+                        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                          value: http://monitoring-tempo.monitoring.svc.cluster.local:4318
+                        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+                          value: http/protobuf
+                        - name: POD_NAME
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: metadata.name
+                        - name: POD_NAMESPACE
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: metadata.namespace
+                        - name: OTEL_RESOURCE_ATTRIBUTES
+                          value: k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE)
+                      {{- if $env }}
+                      envFrom:
+                        - configMapRef:
+                            name: app-env
+                      {{- end }}
+                      livenessProbe:
+                        failureThreshold: 3
+                        httpGet:
+                          path: /health
+                          port: http
+                        initialDelaySeconds: 15
+                        periodSeconds: 20
+                      readinessProbe:
+                        failureThreshold: 3
+                        httpGet:
+                          path: /health
+                          port: http
+                        initialDelaySeconds: 5
+                        periodSeconds: 10
+                      resources:
+                        requests:
+                          cpu: {{ $res.requests.cpu | quote }}
+                          memory: {{ $res.requests.memory }}
+                        limits:
+                          cpu: {{ $res.limits.cpu | quote }}
+                          memory: {{ $res.limits.memory }}
+                      securityContext:
+                        allowPrivilegeEscalation: false
+                        capabilities:
+                          drop:
+                            - ALL
+                        readOnlyRootFilesystem: true
+                      volumeMounts:
+                        - mountPath: /tmp
+                          name: tmp
+                  volumes:
+                    - emptyDir: {}
+                      name: tmp
+
+            {{- /* ============================================================
+                 observability — ServiceMonitor (espelho do component metrics)
+                 ============================================================ */}}
+            ---
+            apiVersion: monitoring.coreos.com/v1
+            kind: ServiceMonitor
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: servicemonitor
+              labels:
+                app.kubernetes.io/name: app
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              endpoints:
+                - interval: 30s
+                  path: /metrics
+                  port: http
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ $name }}
+
+            {{- /* ============================================================
+                 http — Certificate + Ingress (espelho do component http)
+                 ============================================================ */}}
+            {{- if $http }}
+            ---
+            apiVersion: cert-manager.io/v1
+            kind: Certificate
+            metadata:
+              name: app-tls
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: certificate
+              labels:
+                app.kubernetes.io/name: app
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              dnsNames:
+                - {{ $name }}.local
+              duration: 2160h
+              issuerRef:
+                kind: ClusterIssuer
+                name: ca-issuer
+              privateKey:
+                algorithm: ECDSA
+                rotationPolicy: Always
+                size: 256
+              renewBefore: 360h
+              secretName: app-tls
+            ---
+            apiVersion: networking.k8s.io/v1
+            kind: Ingress
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: ingress
+                traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+              labels:
+                app.kubernetes.io/name: app
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              ingressClassName: traefik
+              rules:
+                - host: {{ $name }}.local
+                  http:
+                    paths:
+                      - backend:
+                          service:
+                            name: {{ $name }}
+                            port:
+                              name: http
+                        path: /
+                        pathType: Prefix
+              tls:
+                - hosts:
+                    - {{ $name }}.local
+                  secretName: app-tls
+            {{- end }}
+
+            {{- /* ============================================================
+                 capabilities — XRs separados (lifecycle próprio, aditivos;
+                 decisão de granularidade do experimento)
+                 ============================================================ */}}
+            {{- if has "database" $caps }}
+            ---
+            apiVersion: platform.lab/v1alpha1
+            kind: XAppDatabase
+            metadata:
+              name: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: database
+              labels:
+                crossplane.io/claim-name: {{ $name }}
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              databaseName: {{ $name | replace "-" "_" }}
+              appUser: {{ $name | replace "-" "_" }}_user
+              appNamespace: {{ $name }}
+            {{- end }}
+            {{- if has "cache" $caps }}
+            ---
+            apiVersion: platform.lab/v1alpha1
+            kind: XAppCache
+            metadata:
+              name: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: cache
+              labels:
+                crossplane.io/claim-name: {{ $name }}
+                backstage.io/kubernetes-id: {{ $name }}
+            spec:
+              appNamespace: {{ $name }}
+            {{- end }}

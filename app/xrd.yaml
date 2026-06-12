@@ -1,0 +1,59 @@
+# App — workload completo atrás de uma API (Caminho B do workload experiment,
+# /home/lab/WORKLOAD_EXPERIMENT_PLAN.md). Spec espelha o service definition
+# (contrato no org-ci-platform); o tradutor de CI converte service.yaml -> App.
+#
+# Idioma v2: XRD apiextensions.crossplane.io/v2, sem claim. scope: Cluster
+# porque o App é dono do ciclo de vida do próprio namespace (compõe o
+# XAppNamespace que o cria) — XR namespaced não pode nascer dentro do
+# namespace que ele mesmo cria.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: apps.platform.lab
+spec:
+  group: platform.lab
+  scope: Cluster
+
+  names:
+    kind: App
+    plural: apps
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                image:
+                  type: string
+                  description: >-
+                    Referência completa da imagem (repo:tag). Escrita pelo
+                    kustomize wrapper do gitops repo — a promoção de tag do
+                    ci-tag continua dona dela, não a intenção.
+                size:
+                  type: string
+                  description: Perfil de recursos — dirige resources do container E quota do namespace.
+                  enum: [small, medium, large]
+                  default: small
+                http:
+                  type: boolean
+                  description: Expõe HTTP externo (Ingress + Certificate).
+                  default: true
+                env:
+                  type: object
+                  description: Variáveis de ambiente não-sensíveis.
+                  additionalProperties:
+                    type: string
+                capabilities:
+                  type: array
+                  description: Serviços de infra com lifecycle próprio (claims separadas).
+                  items:
+                    type: string
+                    enum: [database, cache]
+              required:
+                - image
