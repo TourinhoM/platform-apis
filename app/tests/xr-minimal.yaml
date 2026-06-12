@@ -1,9 +1,0 @@
-# Fixture de lint: o MENOR App válido (defaults + http desligado).
-# Exercita o branch sem Ingress/Certificate e os defaults de size/env/caps.
-apiVersion: platform.lab/v1alpha1
-kind: App
-metadata:
-  name: lint-minimal
-spec:
-  image: ghcr.io/tourinho-labs/lint-minimal:0.0.0
-  http: false

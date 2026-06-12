@@ -129,7 +129,7 @@ spec:
                   apiVersion: v1
                   kind: Secret
                   metadata:
-                    name: {{ $claimName }}-db
+                    name: db-conn  # contrato fixo: gancho envFrom do app-base liga sozinho
                     namespace: {{ $appNs }}
                   data:
                     DATABASE_HOST:     {{ "postgresql.infra.svc.cluster.local" | b64enc }}

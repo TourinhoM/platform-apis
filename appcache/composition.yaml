@@ -47,10 +47,17 @@ spec:
                   apiVersion: v1
                   kind: Secret
                   metadata:
-                    name: {{ $claimName }}-cache-creds
+                    name: cache-conn  # contrato fixo: gancho envFrom do app-base liga sozinho
                     namespace: {{ $appNs }}
                   data:
+                    # redis-password: chave que o chart Bitnami exige (auth.existingSecret).
+                    # REDIS_*: chaves env-style pro envFrom da app (hífen é inválido
+                    # como nome de env var — envFrom pularia redis-password calado).
                     redis-password: {{ $password | b64enc }}
+                    REDIS_HOST:     {{ printf "redis-%s-master.%s.svc.cluster.local" $claimName $appNs | b64enc }}
+                    REDIS_PORT:     {{ "6379" | b64enc }}
+                    REDIS_PASSWORD: {{ $password | b64enc }}
+                    REDIS_URL:      {{ printf "redis://:%s@redis-%s-master.%s.svc.cluster.local:6379" $password $claimName $appNs | b64enc }}
               providerConfigRef:
                 name: in-cluster
             ---
@@ -73,7 +80,7 @@ spec:
                   architecture: standalone
                   auth:
                     enabled: true
-                    existingSecret: {{ $claimName }}-cache-creds
+                    existingSecret: cache-conn
                     existingSecretPasswordKey: redis-password
                   master:
                     resources:

@@ -1,9 +1,0 @@
-apiVersion: platform.lab/v1alpha1
-kind: AppDatabase
-metadata:
-  name: app-catalog
-  namespace: default
-spec:
-  databaseName: app_catalog
-  appUser: app_catalog_user
-  appNamespace: default
