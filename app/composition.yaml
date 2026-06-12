@@ -54,6 +54,17 @@ spec:
                  é o que a composition do appnamespace usa pra derivar o nome
                  do namespace — setada manualmente porque no v2 não há claim.
                  ============================================================ */}}
+            {{- /* Readiness SEMPRE explícita: a inferência nativa não lê
+                 conditions de NENHUM composed resource — nem de XRs do
+                 próprio Crossplane (aprendido na prática: namespace ficava
+                 "not yet ready" com o XAppNamespace Ready=True). */}}
+            {{- $nsReady := "False" }}
+            {{- $nsObs := index (.observed.resources | default dict) "namespace" }}
+            {{- if $nsObs }}
+            {{- range dig "resource" "status" "conditions" (list) $nsObs }}
+            {{- if and (eq .type "Ready") (eq .status "True") }}{{ $nsReady = "True" }}{{ end }}
+            {{- end }}
+            {{- end }}
             ---
             apiVersion: platform.lab/v1alpha1
             kind: XAppNamespace
@@ -61,6 +72,7 @@ spec:
               name: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: namespace
+                gotemplating.fn.crossplane.io/ready: {{ $nsReady | quote }}
               labels:
                 crossplane.io/claim-name: {{ $name }}
                 backstage.io/kubernetes-id: {{ $name }}
@@ -331,6 +343,13 @@ spec:
                  decisão de granularidade do experimento)
                  ============================================================ */}}
             {{- if has "database" $caps }}
+            {{- $dbReady := "False" }}
+            {{- $dbObs := index (.observed.resources | default dict) "database" }}
+            {{- if $dbObs }}
+            {{- range dig "resource" "status" "conditions" (list) $dbObs }}
+            {{- if and (eq .type "Ready") (eq .status "True") }}{{ $dbReady = "True" }}{{ end }}
+            {{- end }}
+            {{- end }}
             ---
             apiVersion: platform.lab/v1alpha1
             kind: XAppDatabase
@@ -338,6 +357,7 @@ spec:
               name: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: database
+                gotemplating.fn.crossplane.io/ready: {{ $dbReady | quote }}
               labels:
                 crossplane.io/claim-name: {{ $name }}
                 backstage.io/kubernetes-id: {{ $name }}
@@ -347,6 +367,13 @@ spec:
               appNamespace: {{ $name }}
             {{- end }}
             {{- if has "cache" $caps }}
+            {{- $cacheReady := "False" }}
+            {{- $cacheObs := index (.observed.resources | default dict) "cache" }}
+            {{- if $cacheObs }}
+            {{- range dig "resource" "status" "conditions" (list) $cacheObs }}
+            {{- if and (eq .type "Ready") (eq .status "True") }}{{ $cacheReady = "True" }}{{ end }}
+            {{- end }}
+            {{- end }}
             ---
             apiVersion: platform.lab/v1alpha1
             kind: XAppCache
@@ -354,6 +381,7 @@ spec:
               name: {{ $name }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: cache
+                gotemplating.fn.crossplane.io/ready: {{ $cacheReady | quote }}
               labels:
                 crossplane.io/claim-name: {{ $name }}
                 backstage.io/kubernetes-id: {{ $name }}
