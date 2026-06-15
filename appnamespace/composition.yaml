@@ -55,39 +55,47 @@ spec:
                       namespace: placeholder
                     spec:
                       hard:
-                        requests.cpu: placeholder
-                        requests.memory: placeholder
-                        limits.cpu: placeholder
-                        limits.memory: placeholder
+                        # Teto TOTAL do namespace (a cerca de SOMA). Platform owns;
+                        # não mais derivado de size. Default são p/ o lab.
+                        requests.cpu: "4"
+                        requests.memory: 4Gi
+                        limits.cpu: "4"
+                        limits.memory: 4Gi
                 providerConfigRef:
                   name: in-cluster
             patches:
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.labels["crossplane.io/claim-name"]
                 toFieldPath: spec.forProvider.manifest.metadata.namespace
-              # size → ResourceQuota: a plataforma é dona dos números; o dev só
-              # escolhe o tamanho. requests = limits (teto único do namespace).
+
+          # Recurso 3: LimitRange — a cerca POR container. Dá default (pro pod que
+          # não declara resources) e min/max (teto/piso por container). É o que
+          # permite o dev setar resources LIVRE no gitops sem furar a cerca:
+          # admission rejeita acima do max ou abaixo do min.
+          - name: limit-range
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: LimitRange
+                    metadata:
+                      name: default
+                      namespace: placeholder
+                    spec:
+                      limits:
+                        # SÓ a cerca (max/min por container). Sem default/
+                        # defaultRequest: os valores são do dev (patch de resources
+                        # no gitops), não daqui. Admission rejeita container acima
+                        # do max ou abaixo do min.
+                        - type: Container
+                          max: { cpu: "2", memory: 2Gi }
+                          min: { cpu: 10m, memory: 16Mi }
+                providerConfigRef:
+                  name: in-cluster
+            patches:
               - type: FromCompositeFieldPath
-                fromFieldPath: spec.size
-                toFieldPath: spec.forProvider.manifest.spec.hard["requests.cpu"]
-                transforms:
-                  - type: map
-                    map: { small: "1", medium: "4", large: "8" }
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.size
-                toFieldPath: spec.forProvider.manifest.spec.hard["limits.cpu"]
-                transforms:
-                  - type: map
-                    map: { small: "1", medium: "4", large: "8" }
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.size
-                toFieldPath: spec.forProvider.manifest.spec.hard["requests.memory"]
-                transforms:
-                  - type: map
-                    map: { small: "1Gi", medium: "4Gi", large: "8Gi" }
-              - type: FromCompositeFieldPath
-                fromFieldPath: spec.size
-                toFieldPath: spec.forProvider.manifest.spec.hard["limits.memory"]
-                transforms:
-                  - type: map
-                    map: { small: "1Gi", medium: "4Gi", large: "8Gi" }
+                fromFieldPath: metadata.labels["crossplane.io/claim-name"]
+                toFieldPath: spec.forProvider.manifest.metadata.namespace

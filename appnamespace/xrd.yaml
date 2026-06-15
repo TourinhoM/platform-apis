@@ -29,18 +29,5 @@ spec:
                 teamName:
                   type: string
                   description: Nome do time dono do namespace (usado como label)
-                # Bounded self-service: o dev escolhe um TAMANHO do cardápio, não
-                # números livres. A Composition mapeia size → ResourceQuota.
-                # Default small → o caso comum não precisa nem declarar.
-                size:
-                  type: string
-                  description: >
-                    T-shirt size do namespace. Mapeia pra ResourceQuota:
-                    small=cpu1/1Gi · medium=cpu4/4Gi · large=cpu8/8Gi.
-                  enum:
-                    - small
-                    - medium
-                    - large
-                  default: small
               required:
                 - teamName
