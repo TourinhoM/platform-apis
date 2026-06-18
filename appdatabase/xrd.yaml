@@ -1,0 +1,40 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xappdatabases.platform.lab
+spec:
+  group: platform.lab
+
+  names:
+    kind: XAppDatabase
+    plural: xappdatabases
+
+  claimNames:
+    kind: AppDatabase
+    plural: appdatabases
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              # Claim MÍNIMA (filosofia do contrato): o dev/renderer declara só
+              # appName + env; dbName, appUser e o path do Vault são derivados
+              # por convenção na Composition. Banco no postgres COMPARTILHADO.
+              properties:
+                appName:
+                  type: string
+                  description: Nome do serviço (do platform.yaml). Vira user/db por convenção.
+                  pattern: "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$"
+                env:
+                  type: string
+                  description: Ambiente — define o path do Vault (databases/<env>/<app>).
+                  enum: [dev, hml, prod]
+              required:
+                - appName
+                - env
